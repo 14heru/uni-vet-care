@@ -47,4 +47,12 @@ class DoctorProfile extends Model
     {
         return $this->hasMany(ScheduleException::class, 'doctor_id');
     }
+
+    /**
+     * Get the bookings for this doctor profile.
+     */
+    public function bookings(): HasMany
+    {
+        return $this->hasMany(Booking::class, 'doctor_id');
+    }
 }

@@ -35,4 +35,12 @@ class CustomerProfile extends Model
     {
         return $this->hasMany(Pet::class, 'customer_id');
     }
+
+    /**
+     * Get the bookings made by this customer profile.
+     */
+    public function bookings(): HasMany
+    {
+        return $this->hasMany(Booking::class, 'customer_id');
+    }
 }
