@@ -52,6 +52,14 @@ class User extends Authenticatable
     }
 
     /**
+     * Get the customer profile associated with the user.
+     */
+    public function customerProfile(): HasOne
+    {
+        return $this->hasOne(CustomerProfile::class);
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
