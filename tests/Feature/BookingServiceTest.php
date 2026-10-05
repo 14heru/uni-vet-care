@@ -48,6 +48,60 @@ class BookingServiceTest extends TestCase
         $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
     }
 
+    public function test_admin_can_create_booking_for_selected_pets_owner_without_customer_profile(): void
+    {
+        $fixture = $this->createFixture();
+        $adminRole = Role::firstOrCreate(['name' => 'admin']);
+        $admin = User::factory()->for($adminRole)->create(['status' => 'active']);
+
+        $this->assertSame('active', $admin->status);
+        $this->assertNull($admin->customerProfile()->first());
+
+        $booking = $this->service->create(
+            $admin,
+            $fixture['pet']->id,
+            $fixture['doctor']->id,
+            $fixture['schedule']->id,
+            '2026-10-05T09:00+07:00',
+            '2026-10-05T09:30+07:00',
+        );
+
+        $this->assertInstanceOf(Booking::class, $booking);
+        $this->assertSame($fixture['pet']->customer_id, $booking->customer_id);
+        $this->assertSame($fixture['pet']->id, $booking->pet_id);
+        $this->assertSame(Booking::STATUS_PENDING, $booking->status);
+        $this->assertMatchesRegularExpression('/^UVC-20261004-[A-Z0-9]{10}$/', $booking->booking_code);
+        $this->assertSame(
+            sprintf('doctor:%d:20261005090000', $fixture['doctor']->id),
+            $booking->slot_key,
+        );
+    }
+
+    public function test_admin_cannot_create_booking_for_a_nonexistent_pet(): void
+    {
+        $fixture = $this->createFixture();
+        $adminRole = Role::firstOrCreate(['name' => 'admin']);
+        $admin = User::factory()->for($adminRole)->create(['status' => 'active']);
+
+        $this->assertNull($admin->customerProfile()->first());
+
+        try {
+            $this->service->create(
+                $admin,
+                PHP_INT_MAX,
+                $fixture['doctor']->id,
+                $fixture['schedule']->id,
+                '2026-10-05T09:00+07:00',
+                '2026-10-05T09:30+07:00',
+            );
+            $this->fail('Expected an unavailable result for a nonexistent pet.');
+        } catch (BookingUnavailableException $exception) {
+            $this->assertSame('The selected appointment slot is no longer available.', $exception->getMessage());
+        }
+
+        $this->assertDatabaseCount('bookings', 0);
+    }
+
     public function test_new_booking_is_pending_and_receives_a_unique_server_booking_code(): void
     {
         $fixture = $this->createFixture();

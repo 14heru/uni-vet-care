@@ -57,13 +57,22 @@ class BookingService
                 $user = User::query()
                     ->with(['customerProfile', 'role'])
                     ->find($authenticatedUser->getKey());
-                $customer = $user?->customerProfile;
-                $pet = $customer instanceof CustomerProfile
-                    ? Pet::query()
-                        ->whereKey($petId)
-                        ->where('customer_id', $customer->getKey())
-                        ->first()
-                    : null;
+                $role = $user?->role?->name;
+                $customer = $role === 'customer' ? $user?->customerProfile : null;
+                $pet = match ($role) {
+                    'customer' => $customer instanceof CustomerProfile
+                        ? Pet::query()
+                            ->whereKey($petId)
+                            ->where('customer_id', $customer->getKey())
+                            ->first()
+                        : null,
+                    'admin' => Pet::query()->with('customer')->find($petId),
+                    default => null,
+                };
+
+                if ($role === 'admin') {
+                    $customer = $pet?->customer;
+                }
                 $schedule = $doctor === null
                     ? null
                     : DoctorSchedule::query()
@@ -76,7 +85,7 @@ class BookingService
                 if (
                     $user === null
                     || $user->status !== 'active'
-                    || $user->role?->name !== 'customer'
+                    || !in_array($role, ['customer', 'admin'], true)
                     || !$customer instanceof CustomerProfile
                     || $pet === null
                     || $doctor === null
