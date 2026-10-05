@@ -39,4 +39,12 @@ class DoctorProfile extends Model
     {
         return $this->hasMany(DoctorSchedule::class, 'doctor_id');
     }
+
+    /**
+     * Get the schedule exceptions for the doctor profile.
+     */
+    public function exceptions(): HasMany
+    {
+        return $this->hasMany(ScheduleException::class, 'doctor_id');
+    }
 }
