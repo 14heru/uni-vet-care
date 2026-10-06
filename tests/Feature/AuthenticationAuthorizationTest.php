@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\AuditLogService;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
@@ -44,6 +47,12 @@ class AuthenticationAuthorizationTest extends TestCase
         $this->assertAuthenticatedAs($user, 'web');
         $this->assertNotSame($oldSessionId, $this->app['session']->getId());
         $this->assertSame('preserved', session('pre_login_value'));
+
+        $audit = AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGIN)->sole();
+        $this->assertSame($user->id, $audit->actor_user_id);
+        $this->assertSame(AuditLogService::ENTITY_USER, $audit->entity_type);
+        $this->assertSame($user->id, $audit->entity_id);
+        $this->assertNull($audit->metadata);
     }
 
     public function test_invalid_password_returns_generic_authentication_error(): void
@@ -58,6 +67,7 @@ class AuthenticationAuthorizationTest extends TestCase
         $response->assertRedirect('/')
             ->assertSessionHasErrors(['email' => 'These credentials do not match our records.']);
         $this->assertGuest('web');
+        $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGIN)->count());
     }
 
     public function test_inactive_user_cannot_log_in_and_receives_the_generic_error(): void
@@ -72,6 +82,7 @@ class AuthenticationAuthorizationTest extends TestCase
         $response->assertRedirect('/')
             ->assertSessionHasErrors(['email' => 'These credentials do not match our records.']);
         $this->assertGuest('web');
+        $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGIN)->count());
     }
 
     public function test_login_rate_limits_after_five_failed_attempts_with_a_generic_error(): void
@@ -107,6 +118,7 @@ class AuthenticationAuthorizationTest extends TestCase
                 ->assertSessionHasErrors(['email' => 'These credentials do not match our records.']);
             $this->assertGuest('web');
             $this->assertSame(5, RateLimiter::attempts($throttleKey));
+            $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGIN)->count());
         } finally {
             RateLimiter::clear($throttleKey);
         }
@@ -173,6 +185,78 @@ class AuthenticationAuthorizationTest extends TestCase
         $this->assertNotSame($oldSessionId, $this->app['session']->getId());
         $this->assertNotSame($oldToken, session()->token());
         $this->assertNull(session('existing_value'));
+
+        $audit = AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGOUT)->sole();
+        $this->assertSame($user->id, $audit->actor_user_id);
+        $this->assertSame(AuditLogService::ENTITY_USER, $audit->entity_type);
+        $this->assertSame($user->id, $audit->entity_id);
+        $this->assertNull($audit->metadata);
+    }
+
+    public function test_unauthenticated_logout_creates_no_audit_event(): void
+    {
+        $this->post('/logout')->assertRedirect('/login');
+
+        $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGOUT)->count());
+    }
+
+    public function test_login_audit_failure_invalidates_session_and_leaves_user_unauthenticated(): void
+    {
+        $user = $this->createUser('customer', 'audit-failed-login@example.test');
+        $this->withSession(['pre_login_value' => 'must be cleared']);
+        $oldToken = session()->token();
+        $failure = new QueryException('mysql', 'insert into audit_logs', [], new \Exception('Simulated audit persistence failure'));
+
+        AuditLog::saving(function () use ($failure): void {
+            throw $failure;
+        });
+
+        try {
+            $response = $this->post('/login', [
+                'email' => $user->email,
+                'password' => 'correct-password',
+            ]);
+        } finally {
+            AuditLog::flushEventListeners();
+            AuditLog::clearBootedModels();
+        }
+
+        $response->assertStatus(500)
+            ->assertSeeText('Unable to complete authentication. Please try again.')
+            ->assertDontSee('Simulated audit persistence failure')
+            ->assertDontSee('insert into audit_logs');
+        $this->assertGuest('web');
+        $this->assertNull(session('pre_login_value'));
+        $this->assertNotSame($oldToken, session()->token());
+        $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGIN)->count());
+    }
+
+    public function test_logout_audit_failure_leaves_user_logged_out(): void
+    {
+        $user = $this->createUser('customer', 'audit-failed-logout@example.test');
+        $this->actingAs($user, 'web')->withSession(['existing_value' => 'must be cleared']);
+        $oldToken = session()->token();
+        $failure = new QueryException('mysql', 'insert into audit_logs', [], new \Exception('Simulated audit persistence failure'));
+
+        AuditLog::saving(function () use ($failure): void {
+            throw $failure;
+        });
+
+        try {
+            $response = $this->post('/logout');
+        } finally {
+            AuditLog::flushEventListeners();
+            AuditLog::clearBootedModels();
+        }
+
+        $response->assertStatus(500)
+            ->assertSeeText('Unable to complete authentication. Please try again.')
+            ->assertDontSee('Simulated audit persistence failure')
+            ->assertDontSee('insert into audit_logs');
+        $this->assertGuest('web');
+        $this->assertNull(session('existing_value'));
+        $this->assertNotSame($oldToken, session()->token());
+        $this->assertSame(0, AuditLog::query()->where('action', AuditLogService::ACTION_AUTH_LOGOUT)->count());
     }
 
     public function test_unauthenticated_user_is_rejected_by_auth_middleware(): void
