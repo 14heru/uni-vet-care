@@ -551,11 +551,235 @@ class BookingServiceTest extends TestCase
     /** @param array<string, int> $fixture */
     private function deleteCommittedConcurrencyFixture(\Illuminate\Database\Connection $connection, array $fixture): void
     {
+        $connection->table('audit_logs')->whereIn('actor_user_id', [$fixture['customer_user_id'], $fixture['doctor_user_id']])->delete();
         $connection->table('bookings')->where('doctor_id', $fixture['doctor_id'])->delete();
         $connection->table('doctor_schedules')->where('id', $fixture['schedule_id'])->delete();
         $connection->table('pets')->where('id', $fixture['pet_id'])->delete();
         $connection->table('doctor_profiles')->where('id', $fixture['doctor_id'])->delete();
         $connection->table('customer_profiles')->where('id', $fixture['customer_id'])->delete();
         $connection->table('users')->whereIn('id', [$fixture['customer_user_id'], $fixture['doctor_user_id']])->delete();
+    }
+
+    public function test_successful_customer_booking_creates_audit_log(): void
+    {
+        $fixture = $this->createFixture();
+
+        $booking = $this->book($fixture);
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'BOOKING_CREATED',
+            'entity_type' => 'booking',
+            'entity_id' => $booking->id,
+            'actor_user_id' => $fixture['user']->id,
+        ]);
+
+        $auditLog = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking->id)
+            ->where('entity_type', 'booking')
+            ->first();
+
+        $this->assertNotNull($auditLog);
+        $this->assertSame('BOOKING_CREATED', $auditLog->action);
+        $this->assertTrue($auditLog->actor->is($fixture['user']));
+        $this->assertSame($booking->booking_code, $auditLog->metadata['booking_code']);
+        $this->assertSame($booking->appointment_start, $auditLog->metadata['appointment_start']);
+        $this->assertSame($booking->appointment_end, $auditLog->metadata['appointment_end']);
+        $this->assertSame($booking->doctor_id, $auditLog->metadata['doctor_id']);
+        $this->assertSame($booking->customer_id, $auditLog->metadata['customer_id']);
+        $this->assertSame($booking->pet_id, $auditLog->metadata['pet_id']);
+        $this->assertSame($booking->doctor_schedule_id, $auditLog->metadata['doctor_schedule_id']);
+    }
+
+    public function test_successful_admin_booking_creates_audit_log_with_admin_as_actor(): void
+    {
+        $fixture = $this->createFixture();
+        $adminRole = \App\Models\Role::firstOrCreate(['name' => 'admin']);
+        $admin = User::factory()->for($adminRole)->create(['status' => 'active']);
+
+        $booking = $this->service->create(
+            $admin,
+            $fixture['pet']->id,
+            $fixture['doctor']->id,
+            $fixture['schedule']->id,
+            '2026-10-05T09:00+07:00',
+            '2026-10-05T09:30+07:00',
+        );
+
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'BOOKING_CREATED',
+            'entity_type' => 'booking',
+            'entity_id' => $booking->id,
+            'actor_user_id' => $admin->id,
+        ]);
+
+        $auditLog = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking->id)
+            ->where('entity_type', 'booking')
+            ->first();
+
+        $this->assertNotNull($auditLog);
+        $this->assertTrue($auditLog->actor->is($admin));
+        $this->assertSame($booking->customer_id, $auditLog->metadata['customer_id']);
+        $this->assertSame($fixture['customer']->id, $auditLog->metadata['customer_id']);
+    }
+
+    public function test_audit_metadata_does_not_contain_slot_key(): void
+    {
+        $fixture = $this->createFixture();
+
+        $booking = $this->book($fixture);
+
+        $auditLog = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking->id)
+            ->where('entity_type', 'booking')
+            ->first();
+
+        $this->assertNotNull($auditLog);
+        $this->assertArrayNotHasKey('slot_key', $auditLog->metadata ?? []);
+        $this->assertArrayNotHasKey('password', $auditLog->metadata ?? []);
+        $this->assertArrayNotHasKey('token', $auditLog->metadata ?? []);
+    }
+
+    public function test_exactly_one_audit_log_created_per_successful_booking(): void
+    {
+        $fixture = $this->createFixture();
+
+        $booking = $this->book($fixture);
+
+        $auditCount = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking->id)
+            ->where('entity_type', 'booking')
+            ->where('action', 'BOOKING_CREATED')
+            ->count();
+
+        $this->assertSame(1, $auditCount);
+    }
+
+    public function test_failed_booking_does_not_create_audit_log(): void
+    {
+        $fixture = $this->createFixture();
+        $otherCustomer = $this->createCustomer();
+        $otherPet = $otherCustomer->pets()->create(['name' => 'Luna', 'species' => 'Cat']);
+
+        $initialAuditCount = \App\Models\AuditLog::query()->count();
+
+        try {
+            $this->book($fixture, petId: $otherPet->id);
+            $this->fail('Expected BookingUnavailableException');
+        } catch (BookingUnavailableException $e) {
+            // Expected
+        }
+
+        $finalAuditCount = \App\Models\AuditLog::query()->count();
+        $this->assertSame($initialAuditCount, $finalAuditCount);
+    }
+
+    public function test_unavailable_slot_does_not_create_audit_log(): void
+    {
+        $fixture = $this->createFixture();
+        $this->book($fixture);
+
+        $initialAuditCount = \App\Models\AuditLog::query()->count();
+
+        try {
+            $this->book($fixture);
+            $this->fail('Expected BookingUnavailableException for already booked slot');
+        } catch (BookingUnavailableException $e) {
+            // Expected
+        }
+
+        $finalAuditCount = \App\Models\AuditLog::query()->count();
+        $this->assertSame($initialAuditCount, $finalAuditCount);
+    }
+
+    public function test_booking_and_audit_are_atomic_on_audit_failure(): void
+    {
+        $fixture = $this->createFixture();
+
+        // Force audit log failure by simulating a database error
+        \App\Models\AuditLog::saving(function () {
+            throw new \Illuminate\Database\QueryException(
+                'mysql',
+                'insert into audit_logs',
+                [],
+                new \Exception('Simulated audit failure')
+            );
+        });
+
+        $initialBookingCount = Booking::query()->count();
+        $initialAuditCount = \App\Models\AuditLog::query()->count();
+
+        try {
+            $this->book($fixture);
+            $this->fail('Expected QueryException to bubble up from audit log failure');
+        } catch (\Illuminate\Database\QueryException $e) {
+            $this->assertStringContainsString('Simulated audit failure', $e->getMessage());
+        } finally {
+            \App\Models\AuditLog::flushEventListeners();
+            \App\Models\AuditLog::clearBootedModels();
+        }
+
+        // Verify transaction was rolled back - no booking and no audit log
+        $finalBookingCount = Booking::query()->count();
+        $finalAuditCount = \App\Models\AuditLog::query()->count();
+
+        $this->assertSame($initialBookingCount, $finalBookingCount, 'Booking should not be created when audit fails');
+        $this->assertSame($initialAuditCount, $finalAuditCount, 'Audit log should not be created when it fails');
+    }
+
+    public function test_slot_key_collision_does_not_create_audit_log(): void
+    {
+        $fixture = $this->createFixture();
+
+        // Insert a stale booking with the same slot_key
+        DB::table('bookings')->insert([
+            'booking_code' => 'UVC-STALE-KEY',
+            'customer_id' => $fixture['customer']->id,
+            'pet_id' => $fixture['pet']->id,
+            'doctor_id' => $fixture['doctor']->id,
+            'doctor_schedule_id' => $fixture['schedule']->id,
+            'appointment_start' => '2026-10-05 08:00:00',
+            'appointment_end' => '2026-10-05 08:30:00',
+            'status' => Booking::STATUS_PENDING,
+            'slot_key' => 'doctor:'.$fixture['doctor']->id.':20261005090000',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $initialAuditCount = \App\Models\AuditLog::query()->count();
+
+        try {
+            $this->book($fixture);
+            $this->fail('Expected BookingUnavailableException for slot key collision');
+        } catch (BookingUnavailableException $e) {
+            // Expected
+        }
+
+        $finalAuditCount = \App\Models\AuditLog::query()->count();
+        $this->assertSame($initialAuditCount, $finalAuditCount, 'No audit log should be created on collision');
+    }
+
+    public function test_multiple_successful_bookings_create_separate_audit_logs(): void
+    {
+        $fixture = $this->createFixture();
+
+        $booking1 = $this->book($fixture);
+        $booking2 = $this->book($fixture, start: '2026-10-05T09:30+07:00', end: '2026-10-05T10:00+07:00');
+
+        $audit1 = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking1->id)
+            ->where('entity_type', 'booking')
+            ->first();
+
+        $audit2 = \App\Models\AuditLog::query()
+            ->where('entity_id', $booking2->id)
+            ->where('entity_type', 'booking')
+            ->first();
+
+        $this->assertNotNull($audit1);
+        $this->assertNotNull($audit2);
+        $this->assertNotSame($audit1->id, $audit2->id);
+        $this->assertSame($booking1->booking_code, $audit1->metadata['booking_code']);
+        $this->assertSame($booking2->booking_code, $audit2->metadata['booking_code']);
     }
 }

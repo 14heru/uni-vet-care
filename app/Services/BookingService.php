@@ -18,7 +18,10 @@ class BookingService
 {
     private const BUSINESS_TIMEZONE = 'Asia/Jakarta';
 
-    public function __construct(private readonly DoctorAvailabilityService $availability) {}
+    public function __construct(
+        private readonly DoctorAvailabilityService $availability,
+        private readonly AuditLogService $auditLog,
+    ) {}
 
     /**
      * Create a booking from the authenticated user and an exact generated slot.
@@ -149,6 +152,24 @@ class BookingService
                     'status' => Booking::STATUS_PENDING,
                     'slot_key' => $slotKey,
                 ])->save();
+
+                // Create audit log for successful booking creation
+                $this->auditLog->log(
+                    $authenticatedUser,
+                    AuditLogService::ACTION_BOOKING_CREATED,
+                    AuditLogService::ENTITY_BOOKING,
+                    $booking->id,
+                    'Booking created successfully',
+                    [
+                        'booking_code' => $booking->booking_code,
+                        'appointment_start' => $booking->appointment_start,
+                        'appointment_end' => $booking->appointment_end,
+                        'doctor_id' => $booking->doctor_id,
+                        'customer_id' => $booking->customer_id,
+                        'pet_id' => $booking->pet_id,
+                        'doctor_schedule_id' => $booking->doctor_schedule_id,
+                    ]
+                );
 
                 return $booking;
             });
