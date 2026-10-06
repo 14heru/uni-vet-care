@@ -5,9 +5,7 @@ use App\Http\Controllers\BookingStatusController;
 use App\Http\Controllers\Customer\BookingController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::view('/', 'public.home')->name('home');
 
 Route::post('/login', [AuthenticatedSessionController::class, 'store'])
     ->middleware('guest')
