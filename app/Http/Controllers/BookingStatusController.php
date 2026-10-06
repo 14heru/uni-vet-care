@@ -23,6 +23,7 @@ class BookingStatusController extends Controller
         try {
             $updatedBooking = $bookingStatusService->transition(
                 $booking,
+                $request->user(),
                 $input['status'],
                 $input['reason'] ?? null,
             );

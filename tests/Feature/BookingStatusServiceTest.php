@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Exceptions\InvalidBookingStatusTransitionException;
+use App\Models\AuditLog;
 use App\Models\Booking;
 use App\Models\CustomerProfile;
 use App\Models\DoctorProfile;
@@ -11,8 +12,10 @@ use App\Models\Pet;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\BookingStatusService;
+use App\Services\AuditLogService;
 use Illuminate\Database\Connection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -36,11 +39,12 @@ class BookingStatusServiceTest extends TestCase
         foreach ($transitions as [$currentStatus, $newStatus]) {
             $booking = $this->createBooking($fixture, $currentStatus);
 
-            $updated = app(BookingStatusService::class)->transition($booking, $newStatus);
+            $updated = app(BookingStatusService::class)->transition($booking, $fixture['actor'], $newStatus);
 
             $this->assertSame($newStatus, $updated->fresh()->status);
             $this->assertSame(1, $booking->statusHistories()->count());
             $this->assertSame($newStatus, $booking->statusHistories()->firstOrFail()->status);
+            $this->assertSame(1, AuditLog::query()->where('entity_id', $booking->id)->where('action', AuditLogService::ACTION_BOOKING_STATUS_CHANGED)->count());
         }
     }
 
@@ -68,7 +72,7 @@ class BookingStatusServiceTest extends TestCase
                 $booking = $this->createBooking($fixture, $currentStatus);
 
                 try {
-                    app(BookingStatusService::class)->transition($booking, $newStatus);
+                    app(BookingStatusService::class)->transition($booking, $fixture['actor'], $newStatus);
                     $this->fail("Expected {$currentStatus} -> {$newStatus} to be rejected.");
                 } catch (InvalidBookingStatusTransitionException $exception) {
                     $this->assertSame(
@@ -79,16 +83,19 @@ class BookingStatusServiceTest extends TestCase
 
                 $this->assertSame($currentStatus, $booking->fresh()->status);
                 $this->assertSame(0, $booking->statusHistories()->count());
+                $this->assertSame(0, AuditLog::query()->where('entity_id', $booking->id)->count());
             }
         }
     }
 
     public function test_successful_transition_writes_exactly_one_history_row_with_reason(): void
     {
-        $booking = $this->createBooking($this->createFixture());
+        $fixture = $this->createFixture();
+        $booking = $this->createBooking($fixture);
 
         app(BookingStatusService::class)->transition(
             $booking,
+            $fixture['actor'],
             Booking::STATUS_CONFIRMED,
             'Confirmed by clinic staff',
         );
@@ -100,27 +107,74 @@ class BookingStatusServiceTest extends TestCase
             'status' => Booking::STATUS_CONFIRMED,
             'reason' => 'Confirmed by clinic staff',
         ]);
+        $audit = AuditLog::query()->where('entity_id', $booking->id)->firstOrFail();
+        $this->assertSame(1, AuditLog::query()->where('entity_id', $booking->id)->where('action', AuditLogService::ACTION_BOOKING_STATUS_CHANGED)->count());
+        $this->assertSame(AuditLogService::ENTITY_BOOKING, $audit->entity_type);
+        $this->assertSame($booking->id, $audit->entity_id);
+        $this->assertSame('PENDING', $audit->metadata['old_status']);
+        $this->assertSame(Booking::STATUS_CONFIRMED, $audit->metadata['new_status']);
+        $this->assertSame('Confirmed by clinic staff', $audit->metadata['reason']);
+        $this->assertSame($booking->booking_code, $audit->metadata['booking_code']);
+        $this->assertSame($booking->appointment_start, $audit->metadata['appointment_start']);
+        $this->assertSame($booking->appointment_end, $audit->metadata['appointment_end']);
+        $this->assertSame($booking->doctor_id, $audit->metadata['doctor_id']);
+        $this->assertSame($booking->customer_id, $audit->metadata['customer_id']);
+        $this->assertSame($booking->pet_id, $audit->metadata['pet_id']);
+        $this->assertSame($booking->doctor_schedule_id, $audit->metadata['doctor_schedule_id']);
+        $this->assertArrayNotHasKey('slot_key', $audit->metadata);
+        $this->assertEqualsCanonicalizing([
+            'old_status',
+            'new_status',
+            'reason',
+            'booking_code',
+            'appointment_start',
+            'appointment_end',
+            'doctor_id',
+            'customer_id',
+            'pet_id',
+            'doctor_schedule_id',
+        ], array_keys($audit->metadata));
+        $this->assertSame($fixture['actor']->id, $audit->actor_user_id);
     }
 
     public function test_transition_supports_a_null_reason(): void
     {
-        $booking = $this->createBooking($this->createFixture());
-
-        app(BookingStatusService::class)->transition($booking, Booking::STATUS_CANCELLED);
+        $fixture = $this->createFixture();
+        $booking = $this->createBooking($fixture);
+        app(BookingStatusService::class)->transition($booking, $fixture['actor'], Booking::STATUS_CANCELLED);
 
         $this->assertDatabaseHas('booking_status_histories', [
             'booking_id' => $booking->id,
             'status' => Booking::STATUS_CANCELLED,
             'reason' => null,
         ]);
+        $audit = AuditLog::query()->where('entity_id', $booking->id)->firstOrFail();
+        $this->assertSame(1, AuditLog::query()->where('entity_id', $booking->id)->count());
+        $this->assertNull($audit->metadata['reason'] ?? null);
+    }
+
+    public function test_audit_actor_is_the_trusted_user_argument_not_a_booking_relationship(): void
+    {
+        $fixture = $this->createFixture();
+        $booking = $this->createBooking($fixture);
+        $adminRole = Role::firstOrCreate(['name' => 'admin']);
+        $trustedActor = User::factory()->for($adminRole)->create();
+
+        app(BookingStatusService::class)->transition($booking, $trustedActor, Booking::STATUS_CONFIRMED);
+
+        $audit = AuditLog::query()->where('entity_id', $booking->id)->firstOrFail();
+        $this->assertSame($trustedActor->id, $audit->actor_user_id);
+        $this->assertNotSame($fixture['actor']->id, $audit->actor_user_id);
+        $this->assertNotSame($fixture['doctor']->user_id, $audit->actor_user_id);
     }
 
     public function test_invalid_status_input_fails_safely_without_changing_booking_or_history(): void
     {
-        $booking = $this->createBooking($this->createFixture());
+        $fixture = $this->createFixture();
+        $booking = $this->createBooking($fixture);
 
         try {
-            app(BookingStatusService::class)->transition($booking, 'paid');
+            app(BookingStatusService::class)->transition($booking, $fixture['actor'], 'paid');
             $this->fail('Expected an unapproved status value to be rejected.');
         } catch (InvalidBookingStatusTransitionException $exception) {
             $this->assertSame(
@@ -131,10 +185,12 @@ class BookingStatusServiceTest extends TestCase
 
         $this->assertSame(Booking::STATUS_PENDING, $booking->fresh()->status);
         $this->assertSame(0, $booking->statusHistories()->count());
+        $this->assertDatabaseCount('audit_logs', 0);
     }
 
     public function test_missing_booking_id_fails_safely_without_creating_history(): void
     {
+        $fixture = $this->createFixture();
         $booking = new Booking();
         $booking->forceFill([
             'id' => PHP_INT_MAX,
@@ -143,7 +199,7 @@ class BookingStatusServiceTest extends TestCase
         $booking->exists = true;
 
         try {
-            app(BookingStatusService::class)->transition($booking, Booking::STATUS_CONFIRMED);
+            app(BookingStatusService::class)->transition($booking, $fixture['actor'], Booking::STATUS_CONFIRMED);
             $this->fail('Expected a missing persisted booking to be rejected.');
         } catch (InvalidBookingStatusTransitionException $exception) {
             $this->assertSame(
@@ -154,6 +210,32 @@ class BookingStatusServiceTest extends TestCase
 
         $this->assertDatabaseCount('bookings', 0);
         $this->assertDatabaseCount('booking_status_histories', 0);
+        $this->assertDatabaseCount('audit_logs', 0);
+    }
+
+    public function test_audit_failure_rolls_back_status_and_history_and_bubbles_exception(): void
+    {
+        $fixture = $this->createFixture();
+        $booking = $this->createBooking($fixture);
+        $failure = new QueryException('mysql', 'insert into audit_logs', [], new \Exception('Simulated audit persistence failure'));
+
+        AuditLog::saving(function () use ($failure): void {
+            throw $failure;
+        });
+
+        try {
+            app(BookingStatusService::class)->transition($booking, $fixture['actor'], Booking::STATUS_CONFIRMED);
+            $this->fail('Expected the audit persistence failure to bubble up.');
+        } catch (QueryException $exception) {
+            $this->assertSame($failure, $exception);
+        } finally {
+            AuditLog::flushEventListeners();
+            AuditLog::clearBootedModels();
+        }
+
+        $this->assertSame(Booking::STATUS_PENDING, $booking->fresh()->status);
+        $this->assertSame(0, $booking->statusHistories()->count());
+        $this->assertDatabaseCount('audit_logs', 0);
     }
 
     public function test_concurrent_same_status_transitions_serialize_and_write_one_history(): void
@@ -189,7 +271,7 @@ class BookingStatusServiceTest extends TestCase
             $lockHeld = true;
 
             foreach ($workers as $paths) {
-                $processes[] = $this->startStatusWorker($fixture['bookingId'], $gate, $paths);
+                $processes[] = $this->startStatusWorker($fixture['bookingId'], $fixture['customerUserId'], $gate, $paths);
             }
 
             $this->waitForWorkerFiles(array_column($workers, 'ready'), $processes);
@@ -209,6 +291,11 @@ class BookingStatusServiceTest extends TestCase
             $persistedStatus = $connection->table('bookings')
                 ->where('id', $fixture['bookingId'])
                 ->value('status');
+            $audits = $connection->table('audit_logs')
+                ->where('entity_type', AuditLogService::ENTITY_BOOKING)
+                ->where('entity_id', $fixture['bookingId'])
+                ->where('action', AuditLogService::ACTION_BOOKING_STATUS_CHANGED)
+                ->get();
         } finally {
             if ($lockHeld && $connection->transactionLevel() > 0) {
                 $connection->rollBack();
@@ -244,13 +331,16 @@ class BookingStatusServiceTest extends TestCase
         $this->assertSame(Booking::STATUS_CONFIRMED, $persistedStatus);
         $this->assertCount(1, $history);
         $this->assertSame(Booking::STATUS_CONFIRMED, $history->first()->status);
+        $this->assertCount(1, $audits);
+        $this->assertSame($fixture['customerUserId'], $audits->first()->actor_user_id);
     }
 
-    /** @return array{customer: CustomerProfile, pet: Pet, doctor: DoctorProfile, schedule: DoctorSchedule} */
+    /** @return array{actor: User, customer: CustomerProfile, pet: Pet, doctor: DoctorProfile, schedule: DoctorSchedule} */
     private function createFixture(): array
     {
         $customerRole = Role::firstOrCreate(['name' => 'customer']);
-        $customer = User::factory()->for($customerRole)->create()->customerProfile()->create();
+        $actor = User::factory()->for($customerRole)->create();
+        $customer = $actor->customerProfile()->create();
         $pet = $customer->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
 
         $doctorRole = Role::firstOrCreate(['name' => 'doctor']);
@@ -262,7 +352,7 @@ class BookingStatusServiceTest extends TestCase
             'slot_duration_minutes' => 30,
         ]);
 
-        return compact('customer', 'pet', 'doctor', 'schedule');
+        return compact('actor', 'customer', 'pet', 'doctor', 'schedule');
     }
 
     /** @param array{customer: CustomerProfile, pet: Pet, doctor: DoctorProfile, schedule: DoctorSchedule} $fixture */
@@ -358,7 +448,7 @@ class BookingStatusServiceTest extends TestCase
     }
 
     /** @param array{ready: string, started: string} $paths */
-    private function startStatusWorker(int $bookingId, string $gate, array $paths): array
+    private function startStatusWorker(int $bookingId, int $actorUserId, string $gate, array $paths): array
     {
         $worker = base_path('tests/Support/booking_status_concurrency_worker.php');
         $environment = array_merge(getenv(), [
@@ -379,6 +469,7 @@ class BookingStatusServiceTest extends TestCase
             $paths['ready'],
             $paths['started'],
             (string) $bookingId,
+            (string) $actorUserId,
             Booking::STATUS_CONFIRMED,
         ], [
             0 => ['pipe', 'r'],
@@ -431,6 +522,7 @@ class BookingStatusServiceTest extends TestCase
 
     private function deleteCommittedBooking(Connection $connection, array $fixture): void
     {
+        $connection->table('audit_logs')->where('entity_type', AuditLogService::ENTITY_BOOKING)->where('entity_id', $fixture['bookingId'])->delete();
         $connection->table('booking_status_histories')->where('booking_id', $fixture['bookingId'])->delete();
         $connection->table('bookings')->where('id', $fixture['bookingId'])->delete();
         $connection->table('doctor_schedules')->where('id', $fixture['scheduleId'])->delete();
