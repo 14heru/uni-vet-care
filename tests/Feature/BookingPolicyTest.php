@@ -156,6 +156,87 @@ class BookingPolicyTest extends TestCase
         $this->assertFalse(Gate::allows('create', [Booking::class, $otherCustomer]));
     }
 
+    public function test_transition_status_authorization_uses_role_target_and_persisted_ownership(): void
+    {
+        [$customer, $doctor, $booking] = $this->createBookingFixture();
+        [, , $otherCustomerBooking] = $this->createBookingFixture();
+        $otherDoctor = $this->createDoctor();
+        $admin = $this->createUser('admin');
+        $owner = $this->createUser('owner');
+
+        $this->assertTrue(Gate::forUser($customer->user)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CANCELLED],
+        ));
+        $this->assertFalse(Gate::forUser($customer->user)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CONFIRMED],
+        ));
+        $this->assertFalse(Gate::forUser($customer->user)->allows(
+            'transitionStatus', [$otherCustomerBooking, Booking::STATUS_CANCELLED],
+        ));
+
+        foreach ([Booking::STATUS_CONFIRMED, Booking::STATUS_COMPLETED, Booking::STATUS_NO_SHOW] as $status) {
+            $this->assertTrue(Gate::forUser($doctor->user)->allows('transitionStatus', [$booking, $status]));
+        }
+        $this->assertFalse(Gate::forUser($doctor->user)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CANCELLED],
+        ));
+        $this->assertFalse(Gate::forUser($otherDoctor->user)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CONFIRMED],
+        ));
+
+        foreach (Booking::STATUSES as $status) {
+            $this->assertTrue(Gate::forUser($admin)->allows('transitionStatus', [$booking, $status]));
+        }
+        $this->assertFalse(Gate::forUser($owner)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CANCELLED],
+        ));
+    }
+
+    public function test_transition_status_denies_inactive_users_and_missing_profiles(): void
+    {
+        [, , $booking] = $this->createBookingFixture();
+
+        foreach (['admin', 'customer', 'doctor', 'owner'] as $roleName) {
+            $inactiveUser = $this->createInactiveUser($roleName);
+            $this->assertFalse(Gate::forUser($inactiveUser)->allows(
+                'transitionStatus', [$booking, Booking::STATUS_CANCELLED],
+            ));
+        }
+
+        $customerWithoutProfile = $this->createUser('customer');
+        $doctorWithoutProfile = $this->createUser('doctor');
+
+        $this->assertFalse(Gate::forUser($customerWithoutProfile)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CANCELLED],
+        ));
+        $this->assertFalse(Gate::forUser($doctorWithoutProfile)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CONFIRMED],
+        ));
+    }
+
+    public function test_transition_status_denies_unknown_target_for_admin_customer_and_doctor(): void
+    {
+        [$customer, $doctor, $booking] = $this->createBookingFixture();
+        $admin = $this->createUser('admin');
+
+        foreach ([$admin, $customer->user, $doctor->user] as $user) {
+            $this->assertFalse(Gate::forUser($user)->allows(
+                'transitionStatus', [$booking, 'NOT_A_BOOKING_STATUS'],
+            ));
+        }
+    }
+
+    public function test_transition_status_denies_authenticated_user_without_role_relationship(): void
+    {
+        [, , $booking] = $this->createBookingFixture();
+        $userWithoutRole = $this->createUser('admin');
+        $userWithoutRole->setAttribute('role_id', null);
+
+        $this->assertFalse(Gate::forUser($userWithoutRole)->allows(
+            'transitionStatus', [$booking, Booking::STATUS_CONFIRMED],
+        ));
+    }
+
     private function createUser(string $roleName): User
     {
         $role = Role::firstOrCreate(['name' => $roleName]);

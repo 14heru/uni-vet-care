@@ -61,6 +61,29 @@ class BookingPolicy
         return $this->update($user, $booking);
     }
 
+    public function transitionStatus(User $user, Booking $booking, string $targetStatus): bool
+    {
+        if (! in_array($targetStatus, Booking::STATUSES, true)) {
+            return false;
+        }
+
+        if (! $this->isActive($user)) {
+            return false;
+        }
+
+        return match ($this->roleName($user)) {
+            'admin' => true,
+            'customer' => $targetStatus === Booking::STATUS_CANCELLED
+                && $this->ownsCustomerBooking($user, $booking),
+            'doctor' => in_array($targetStatus, [
+                Booking::STATUS_CONFIRMED,
+                Booking::STATUS_COMPLETED,
+                Booking::STATUS_NO_SHOW,
+            ], true) && $user->doctorProfile()->whereKey($booking->doctor_id)->exists(),
+            default => false,
+        };
+    }
+
     private function isActive(User $user): bool
     {
         return $user->newQuery()
