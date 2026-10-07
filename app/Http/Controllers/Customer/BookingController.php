@@ -8,11 +8,26 @@ use App\Http\Requests\StoreBookingRequest;
 use App\Models\Booking;
 use App\Services\BookingService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\View\View;
 
 class BookingController extends Controller
 {
-    public function store(StoreBookingRequest $request, BookingService $bookingService): JsonResponse
+    public function show(Request $request, Booking $booking): View
     {
+        Gate::forUser($request->user())->authorize('view', $booking);
+
+        $booking->load(['doctor.user:id,name', 'pet:id,name,species']);
+
+        return view('customer.bookings.show', compact('booking'));
+    }
+
+    public function store(
+        StoreBookingRequest $request,
+        BookingService $bookingService,
+    ): JsonResponse|RedirectResponse {
         $input = $request->validated();
 
         try {
@@ -25,9 +40,19 @@ class BookingController extends Controller
                 $input['appointment_end'],
             );
         } catch (BookingUnavailableException) {
+            if (! $request->expectsJson() && $request->user()?->role?->name === 'customer') {
+                return back()
+                    ->withInput()
+                    ->withErrors(['appointment_start' => 'That appointment time is no longer available. Please choose another slot.']);
+            }
+
             return response()->json([
                 'message' => 'The selected appointment slot is no longer available.',
             ], JsonResponse::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (! $request->expectsJson() && $request->user()?->role?->name === 'customer') {
+            return redirect()->route('customer.bookings.show', $booking);
         }
 
         return response()->json([

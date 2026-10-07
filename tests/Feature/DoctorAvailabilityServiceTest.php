@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Booking;
 use App\Models\DoctorProfile;
 use App\Models\Role;
 use App\Models\User;
@@ -22,7 +23,7 @@ class DoctorAvailabilityServiceTest extends TestCase
     {
         parent::setUp();
 
-        $this->service = new DoctorAvailabilityService();
+        $this->service = new DoctorAvailabilityService;
         $this->travelTo(CarbonImmutable::parse('2026-10-04 12:00:00', 'Asia/Jakarta'));
     }
 
@@ -281,6 +282,41 @@ class DoctorAvailabilityServiceTest extends TestCase
         $this->assertStringNotContainsString('customer', strtolower($payload));
         $this->assertStringNotContainsString('booking_id', strtolower($payload));
         $this->assertStringContainsString('2026-10-05T10:00+07:00', $payload);
+    }
+
+    public function test_pending_booking_marks_only_its_overlapping_slot_as_booked(): void
+    {
+        $doctor = $this->createDoctorWithSchedule();
+        $customerRole = Role::firstOrCreate(['name' => 'customer']);
+        $customerUser = User::factory()->for($customerRole)->create();
+        $customer = $customerUser->customerProfile()->create();
+        $pet = $customer->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
+        $schedule = $doctor->schedules()->firstOrFail();
+        foreach ([Booking::STATUS_PENDING, Booking::STATUS_CONFIRMED] as $index => $status) {
+            $booking = new Booking;
+            $booking->forceFill([
+                'booking_code' => 'UVC-AVAILABILITY-BOOKED-'.$index,
+                'customer_id' => $customer->id,
+                'pet_id' => $pet->id,
+                'doctor_id' => $doctor->id,
+                'doctor_schedule_id' => $schedule->id,
+                'appointment_start' => '2026-10-05 09:30:00',
+                'appointment_end' => '2026-10-05 10:00:00',
+                'status' => $status,
+            ])->save();
+
+            $result = $this->availability($doctor);
+
+            $this->assertSame('2026-10-05T09:30+07:00', $result->slots[1]['start_at']);
+            $this->assertSame('BOOKED', $result->slots[1]['status']);
+            $this->assertSame($schedule->id, $result->slots[1]['doctor_schedule_id']);
+            $this->assertSame('AVAILABLE', $result->slots[0]['status']);
+
+            $booking->forceFill(['status' => Booking::STATUS_CANCELLED])->save();
+
+            $this->assertSame('AVAILABLE', $this->availability($doctor)->slots[1]['status']);
+            $booking->delete();
+        }
     }
 
     public function test_unknown_doctor_is_unavailable_without_exposing_internal_status(): void

@@ -2,7 +2,9 @@
 
 namespace App\Services;
 
+use App\Models\Booking;
 use App\Models\DoctorProfile;
+use App\Models\DoctorSchedule;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 
@@ -13,15 +15,9 @@ class DoctorAvailabilityService
     /**
      * Calculate candidate appointment slots for one doctor and local date.
      *
-     * Booking occupancy is intentionally not queried yet because the bookings
-     * table does not exist. When integrated, PENDING and CONFIRMED bookings
-     * must block overlapping candidates; CANCELLED bookings must not block
-     * availability, and COMPLETED and NO_SHOW are historical outcomes that
-     * must not block future availability. Determine occupancy using half-open
-     * intervals (candidate.start < booking.end && candidate.end > booking.start)
-     * so adjacent intervals do not overlap. Booking creation must later
-     * revalidate availability transactionally and protect against races and
-     * double booking; this result is informational only.
+     * Generate slots from active schedules and exceptions, then mark slots
+     * occupied by pending or confirmed bookings. Booking creation must still
+     * revalidate availability transactionally to protect against races.
      */
     public function getAvailability(int $doctorId, CarbonImmutable $localDate): AvailabilityResult
     {
@@ -91,15 +87,16 @@ class DoctorAvailabilityService
                 'end' => $end,
                 'duration' => $durations->first(),
                 'source' => 'MODIFIED_EXCEPTION',
+                'doctor_schedule_id' => (int) $schedules->first()->getKey(),
             ]];
         }
 
-        return $this->buildResult($date, $intervals);
+        return $this->buildResult($doctorId, $date, $intervals);
     }
 
     /**
-     * @param  Collection<int, \App\Models\DoctorSchedule>  $schedules
-     * @return list<array{start: CarbonImmutable, end: CarbonImmutable, duration: int, source: string}>|null
+     * @param  Collection<int, DoctorSchedule>  $schedules
+     * @return list<array{start: CarbonImmutable, end: CarbonImmutable, duration: int, source: string, doctor_schedule_id: int}>|null
      */
     private function recurringIntervals(Collection $schedules, CarbonImmutable $date): ?array
     {
@@ -119,6 +116,7 @@ class DoctorAvailabilityService
                 'end' => $end,
                 'duration' => $duration,
                 'source' => 'RECURRING_SCHEDULE',
+                'doctor_schedule_id' => (int) $schedule->getKey(),
             ];
         }
 
@@ -167,13 +165,19 @@ class DoctorAvailabilityService
     }
 
     /**
-     * @param  list<array{start: CarbonImmutable, end: CarbonImmutable, duration: int, source: string}>  $intervals
+     * @param  list<array{start: CarbonImmutable, end: CarbonImmutable, duration: int, source: string, doctor_schedule_id: int}>  $intervals
      */
-    private function buildResult(CarbonImmutable $date, array $intervals): AvailabilityResult
+    private function buildResult(int $doctorId, CarbonImmutable $date, array $intervals): AvailabilityResult
     {
         $now = CarbonImmutable::now(self::BUSINESS_TIMEZONE);
         $isPastDate = $date->lessThan($now->startOfDay());
         $slots = [];
+        $bookings = Booking::query()
+            ->where('doctor_id', $doctorId)
+            ->whereIn('status', [Booking::STATUS_PENDING, Booking::STATUS_CONFIRMED])
+            ->where('appointment_start', '<', $date->endOfDay()->format('Y-m-d H:i:s'))
+            ->where('appointment_end', '>', $date->startOfDay()->format('Y-m-d H:i:s'))
+            ->get(['appointment_start', 'appointment_end']);
 
         foreach ($intervals as $interval) {
             $start = $interval['start'];
@@ -184,13 +188,20 @@ class DoctorAvailabilityService
                 $isPastOrStarted = $isPastDate || (
                     $date->isSameDay($now) && $start->lessThanOrEqualTo($now)
                 );
+                $startValue = $start->format('Y-m-d H:i:s');
+                $endValue = $end->format('Y-m-d H:i:s');
+                $isBooked = $bookings->contains(
+                    fn (Booking $booking): bool => $startValue < $booking->appointment_end
+                        && $endValue > $booking->appointment_start,
+                );
 
                 $slots[] = [
                     'start_at' => $start->format('Y-m-d\TH:iP'),
                     'end_at' => $end->format('Y-m-d\TH:iP'),
-                    'status' => $isPastOrStarted ? 'UNAVAILABLE' : 'AVAILABLE',
+                    'status' => $isPastOrStarted ? 'UNAVAILABLE' : ($isBooked ? 'BOOKED' : 'AVAILABLE'),
                     'source' => $interval['source'],
-                    'reason' => $isPastOrStarted ? 'PAST_OR_STARTED' : null,
+                    'reason' => $isPastOrStarted ? 'PAST_OR_STARTED' : ($isBooked ? 'BOOKED' : null),
+                    'doctor_schedule_id' => $interval['doctor_schedule_id'],
                 ];
 
                 $start = $end;

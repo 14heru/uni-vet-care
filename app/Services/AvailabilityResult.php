@@ -13,7 +13,8 @@ final readonly class AvailabilityResult
      *     end_at: string,
      *     status: string,
      *     source: string,
-     *     reason: string|null
+     *     reason: string|null,
+     *     doctor_schedule_id: int
      * }>  $slots
      */
     public function __construct(
@@ -37,7 +38,8 @@ final readonly class AvailabilityResult
      *         end_at: string,
      *         status: string,
      *         source: string,
-     *         reason: string|null
+     *         reason: string|null,
+     *         doctor_schedule_id: int
      *     }>
      * }
      */

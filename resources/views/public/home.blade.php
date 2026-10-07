@@ -76,7 +76,7 @@
                 <h2 id="booking-title">Let’s make their next visit a good one.</h2>
                 <p>Online appointment booking is coming soon. We’re getting everything ready to help you find the right care for your pet.</p>
             </div>
-            <span class="booking-status">Booking coming soon</span>
+            <a class="button button-light" href="{{ route('customer.bookings.create') }}">Book an appointment <span aria-hidden="true">&rarr;</span></a>
         </div>
     </section>
 @endsection

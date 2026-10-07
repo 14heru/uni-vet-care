@@ -7,6 +7,7 @@
     <meta name="description" content="Uni Vet Care provides thoughtful veterinary care for the pets who make a house a home.">
     <title>@yield('title', 'Uni Vet Care') | Uni Vet Care</title>
     <link rel="stylesheet" href="{{ asset('css/public.css') }}">
+    @stack('styles')
 </head>
 <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
