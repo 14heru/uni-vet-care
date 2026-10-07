@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BookingStatusController;
 use App\Http\Controllers\Customer\BookingController;
 use App\Http\Controllers\Customer\BookingPageController;
+use App\Http\Controllers\Doctor\BookingController as DoctorBookingController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'public.home')->name('home');
@@ -27,6 +28,10 @@ Route::middleware(['auth', 'role:customer'])->prefix('customer')->name('customer
 Route::post('/customer/bookings', [BookingController::class, 'store'])
     ->middleware(['auth', 'role:customer,admin'])
     ->name('customer.bookings.store');
+
+Route::middleware(['auth', 'role:doctor'])->prefix('doctor')->name('doctor.')->group(function () {
+    Route::get('/bookings', [DoctorBookingController::class, 'index'])->name('bookings.index');
+});
 
 Route::post('/bookings/{booking}/status', [BookingStatusController::class, 'transition'])
     ->middleware('auth')

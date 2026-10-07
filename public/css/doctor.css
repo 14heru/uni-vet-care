@@ -1,0 +1,155 @@
+/* Doctor Dashboard Styles */
+.doctor-dashboard-body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+.doctor-header-inner {
+    min-height: 76px;
+}
+.doctor-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    color: #625d69;
+    font-size: 0.88rem;
+}
+.doctor-nav form {
+    margin: 0;
+}
+.doctor-nav-link {
+    padding: 0.3rem 0;
+    border: 0;
+    color: #8e5148;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+    cursor: pointer;
+}
+.doctor-main {
+    width: 100%;
+    flex: 1;
+}
+.doctor-dashboard {
+    max-width: 1040px;
+    padding-top: 4rem;
+    padding-bottom: 5rem;
+}
+.doctor-dashboard h1 {
+    margin-bottom: 0.8rem;
+    color: var(--plum);
+    font-size: clamp(2.4rem, 5vw, 3.5rem);
+    line-height: 1.1;
+}
+.doctor-dashboard-introduction {
+    max-width: 650px;
+    margin-bottom: 2rem;
+    color: var(--muted);
+}
+.doctor-table-container {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    background: #fffdfa;
+    box-shadow: 0 12px 32px rgba(48, 44, 57, 0.05);
+    border-radius: 2px;
+}
+.doctor-appointments-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 0.92rem;
+}
+.doctor-appointments-table th,
+.doctor-appointments-table td {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--line);
+}
+.doctor-appointments-table th {
+    background: #fbf7f4;
+    color: var(--muted);
+    font-size: 0.76rem;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.doctor-appointments-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.doctor-appointments-table tbody tr:hover {
+    background: #fdfaf7;
+}
+.doctor-footer {
+    padding: 2rem max(1rem, calc((100% - 1120px) / 2));
+    color: #bdb7c4;
+    background: #272432;
+}
+.doctor-footer p {
+    margin: 0.8rem 0 0;
+    font-size: 0.88rem;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+.status-badge-pending {
+    color: #73512b;
+    background: #fdf0d5;
+    border: 1px solid #ebd0a4;
+}
+.status-badge-confirmed {
+    color: #1c5b36;
+    background: #e3f5eb;
+    border: 1px solid #c2e6d1;
+}
+.status-badge-completed {
+    color: #204c6e;
+    background: #e1f0fa;
+    border: 1px solid #bedbee;
+}
+.status-badge-cancelled {
+    color: #72322c;
+    background: #fde8e6;
+    border: 1px solid #f5c4bf;
+}
+.status-badge-no_show {
+    color: #585061;
+    background: #ece8f0;
+    border: 1px solid #d5cde0;
+}
+
+@media (max-width: 768px) {
+    .doctor-header-inner {
+        width: calc(100% - 2rem);
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.8rem;
+        padding: 0.7rem 0;
+    }
+    .doctor-nav {
+        gap: 0.8rem;
+        font-size: 0.78rem;
+    }
+    .doctor-dashboard {
+        width: calc(100% - 2rem);
+        padding-top: 2.5rem;
+        padding-bottom: 3.5rem;
+    }
+    .doctor-appointments-table th,
+    .doctor-appointments-table td {
+        padding: 0.75rem 0.85rem;
+        font-size: 0.85rem;
+    }
+}
+
+.booking-empty-state { padding: clamp(1.25rem, 4vw, 2.4rem); border: 1px solid var(--line); background: #fffdfa; box-shadow: 0 12px 32px rgba(48, 44, 57, .05); margin-top: 2rem; }
+.booking-empty-state h2 { margin-bottom: .4rem; color: var(--plum); font-family: Georgia, "Times New Roman", serif; font-size: 1.55rem; font-weight: 400; }
+.booking-empty-state p { margin: 0; color: var(--muted); }
+.booking-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
