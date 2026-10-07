@@ -36,6 +36,12 @@ class StoreBookingRequestTest extends TestCase
             ...$this->validInput($pet->id, $doctor->id, $schedule->id),
             'role' => 'admin',
             'is_admin' => true,
+            'user_id' => 999,
+            'role_id' => 999,
+            'actor_user_id' => 999,
+            'changed_by' => 999,
+            'created_at' => '2000-01-01 00:00:00',
+            'updated_at' => '2000-01-01 00:00:00',
         ]);
 
         $response->assertOk()->assertExactJson([

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Booking;
+use App\Models\AuditLog;
 use App\Models\CustomerProfile;
 use App\Models\DoctorProfile;
 use App\Models\DoctorSchedule;
@@ -10,6 +11,7 @@ use App\Models\Pet;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\AuditLogService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Route;
@@ -109,16 +111,63 @@ class CustomerBookingControllerTest extends TestCase
         $this->actingAs($fixture['customer']->user)
             ->postJson(route('customer.bookings.store'), [
                 ...$this->validInput($fixture),
+                'customer_id' => 999,
+                'user_id' => 999,
+                'role_id' => 999,
                 'booking_code' => 'CLIENT-CODE',
                 'slot_key' => 'CLIENT-SLOT',
                 'status' => Booking::STATUS_CONFIRMED,
+                'actor_user_id' => 999,
+                'changed_by' => 999,
                 'payment_status' => 'PAID',
                 'payment_reference' => 'CLIENT-REFERENCE',
+                'payment_secret' => 'CLIENT-SECRET',
             ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['booking_code', 'slot_key', 'status', 'payment_status', 'payment_reference']);
+            ->assertJsonValidationErrors([
+                'customer_id', 'booking_code', 'slot_key', 'status', 'payment_status',
+                'payment_reference', 'payment_secret',
+            ]);
 
         $this->assertDatabaseCount('bookings', 0);
+    }
+
+    public function test_unknown_identity_audit_and_timestamp_fields_do_not_override_server_values(): void
+    {
+        $fixture = $this->createFixture();
+        $attacker = $this->createUser('admin');
+        $adminRoleId = Role::query()->where('name', 'admin')->value('id');
+
+        $response = $this->actingAs($fixture['customer']->user)
+            ->postJson(route('customer.bookings.store'), [
+                ...$this->validInput($fixture),
+                'user_id' => $attacker->id,
+                'role_id' => $adminRoleId,
+                'actor_user_id' => $attacker->id,
+                'changed_by' => $attacker->id,
+                'created_at' => '2000-01-01 00:00:00',
+                'updated_at' => '2000-01-01 00:00:00',
+            ]);
+
+        $response->assertCreated()->assertJsonPath('data.status', Booking::STATUS_PENDING);
+
+        $booking = Booking::query()->where('booking_code', $response->json('data.booking_code'))->sole();
+        $this->assertSame($fixture['customer']->id, $booking->customer_id);
+        $this->assertSame($fixture['pet']->id, $booking->pet_id);
+        $this->assertSame(Booking::STATUS_PENDING, $booking->status);
+        $this->assertMatchesRegularExpression('/^UVC-20261004-[A-Z0-9]{10}$/', $booking->booking_code);
+        $this->assertSame(
+            sprintf('doctor:%d:20261005090000', $fixture['doctor']->id),
+            $booking->slot_key,
+        );
+        $this->assertNotSame('2000-01-01 00:00:00', $booking->getRawOriginal('created_at'));
+        $this->assertNotSame('2000-01-01 00:00:00', $booking->getRawOriginal('updated_at'));
+
+        $audit = AuditLog::query()
+            ->where('action', AuditLogService::ACTION_BOOKING_CREATED)
+            ->where('entity_id', $booking->id)
+            ->sole();
+        $this->assertSame($fixture['customer']->user->id, $audit->actor_user_id);
     }
 
     public function test_doctor_and_owner_cannot_use_customer_booking_endpoint(): void
@@ -132,6 +181,28 @@ class CustomerBookingControllerTest extends TestCase
         }
 
         $this->assertDatabaseCount('bookings', 0);
+    }
+
+    public function test_forged_customer_role_id_cannot_authorize_doctor_to_create_booking(): void
+    {
+        $fixture = $this->createFixture();
+        $doctor = $fixture['doctor']->user;
+        $persistedDoctorRoleId = $doctor->role_id;
+        $customerRoleId = Role::query()->where('name', 'customer')->value('id');
+
+        $this->actingAs($doctor)
+            ->postJson(route('customer.bookings.store'), [
+                ...$this->validInput($fixture),
+                'role_id' => $customerRoleId,
+            ])
+            ->assertForbidden();
+
+        $this->assertSame($persistedDoctorRoleId, $doctor->fresh()->role_id);
+        $this->assertDatabaseCount('bookings', 0);
+        $this->assertSame(
+            0,
+            AuditLog::query()->where('action', AuditLogService::ACTION_BOOKING_CREATED)->count(),
+        );
     }
 
     public function test_admin_can_create_booking_without_customer_profile_context(): void

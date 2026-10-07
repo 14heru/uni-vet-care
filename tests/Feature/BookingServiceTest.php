@@ -45,7 +45,22 @@ class BookingServiceTest extends TestCase
         $this->assertSame($fixture['schedule']->id, $booking->doctor_schedule_id);
         $this->assertSame('2026-10-05 09:00:00', $booking->appointment_start);
         $this->assertSame('2026-10-05 09:30:00', $booking->appointment_end);
-        $this->assertDatabaseHas('bookings', ['id' => $booking->id]);
+        $this->assertGreaterThan(0, $booking->id);
+        $this->assertSame(Booking::STATUS_PENDING, $booking->status);
+        $this->assertMatchesRegularExpression('/^UVC-20261004-[A-Z0-9]{10}$/', $booking->booking_code);
+        $this->assertSame(
+            sprintf('doctor:%d:20261005090000', $fixture['doctor']->id),
+            $booking->slot_key,
+        );
+        $this->assertNotNull($booking->created_at);
+        $this->assertNotNull($booking->updated_at);
+        $this->assertDatabaseHas('bookings', [
+            'id' => $booking->id,
+            'customer_id' => $fixture['customer']->id,
+            'status' => Booking::STATUS_PENDING,
+            'booking_code' => $booking->booking_code,
+            'slot_key' => $booking->slot_key,
+        ]);
     }
 
     public function test_admin_can_create_booking_for_selected_pets_owner_without_customer_profile(): void
