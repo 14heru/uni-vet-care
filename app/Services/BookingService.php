@@ -91,6 +91,7 @@ class BookingService
                     || !in_array($role, ['customer', 'admin'], true)
                     || !$customer instanceof CustomerProfile
                     || $pet === null
+                    || $pet->status !== 'active'
                     || $doctor === null
                     || $schedule === null
                 ) {

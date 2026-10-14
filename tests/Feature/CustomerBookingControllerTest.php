@@ -87,6 +87,23 @@ class CustomerBookingControllerTest extends TestCase
         $this->assertDatabaseCount('bookings', 0);
     }
 
+    public function test_customer_cannot_book_with_an_inactive_pet(): void
+    {
+        $fixture = $this->createFixture();
+        $fixture['pet']->update(['status' => 'inactive']);
+
+        $response = $this->actingAs($fixture['customer']->user)
+            ->postJson(route('customer.bookings.store'), $this->validInput($fixture));
+
+        $response->assertUnprocessable()
+            ->assertExactJson(['message' => 'The selected appointment slot is no longer available.']);
+
+        $this->assertDatabaseCount('bookings', 0);
+        $this->assertDatabaseMissing('audit_logs', [
+            'action' => AuditLogService::ACTION_BOOKING_CREATED,
+        ]);
+    }
+
     public function test_customer_context_fields_cannot_change_booking_ownership(): void
     {
         $fixture = $this->createFixture();

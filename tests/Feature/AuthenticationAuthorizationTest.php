@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AuthenticationAuthorizationTest extends TestCase
@@ -43,7 +44,7 @@ class AuthenticationAuthorizationTest extends TestCase
             'password' => 'correct-password',
         ]);
 
-        $response->assertRedirect('/');
+        $response->assertRedirect(route('customer.bookings.index'));
         $this->assertAuthenticatedAs($user, 'web');
         $this->assertNotSame($oldSessionId, $this->app['session']->getId());
         $this->assertSame('preserved', session('pre_login_value'));
@@ -53,6 +54,43 @@ class AuthenticationAuthorizationTest extends TestCase
         $this->assertSame(AuditLogService::ENTITY_USER, $audit->entity_type);
         $this->assertSame($user->id, $audit->entity_id);
         $this->assertNull($audit->metadata);
+    }
+
+    public function test_valid_login_respects_an_existing_intended_destination(): void
+    {
+        $user = $this->createUser('customer', 'intended-login@example.test');
+        $this->withSession(['url.intended' => '/customer/bookings/create']);
+
+        $response = $this->post('/login', [
+            'email' => $user->email,
+            'password' => 'correct-password',
+        ]);
+
+        $response->assertRedirect('/customer/bookings/create');
+        $this->assertAuthenticatedAs($user, 'web');
+    }
+
+    #[DataProvider('roleFallbacks')]
+    public function test_successful_login_uses_the_fallback_available_for_each_role(string $role, string $routeName): void
+    {
+        $user = $this->createUser($role, "{$role}-fallback@example.test");
+
+        $this->post('/login', [
+            'email' => $user->email,
+            'password' => 'correct-password',
+        ])->assertRedirect(route($routeName));
+
+        $this->assertAuthenticatedAs($user, 'web');
+    }
+
+    public static function roleFallbacks(): array
+    {
+        return [
+            'customer' => ['customer', 'customer.bookings.index'],
+            'doctor' => ['doctor', 'doctor.bookings.index'],
+            'admin' => ['admin', 'home'],
+            'owner' => ['owner', 'home'],
+        ];
     }
 
     public function test_invalid_password_returns_generic_authentication_error(): void
@@ -149,7 +187,7 @@ class AuthenticationAuthorizationTest extends TestCase
                     'email' => $email,
                     'password' => 'correct-password',
                 ])
-                ->assertRedirect('/');
+                ->assertRedirect(route('customer.bookings.index'));
 
             $this->assertAuthenticatedAs($user, 'web');
             $this->assertSame(0, RateLimiter::attempts($throttleKey));

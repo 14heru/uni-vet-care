@@ -74,7 +74,14 @@ class AuthenticatedSessionController extends Controller
             return $this->auditFailureResponse();
         }
 
-        return redirect()->intended('/');
+        $fallbackRoute = match ($authenticatedUser->role?->name) {
+            'customer' => route('customer.bookings.index'),
+            'doctor' => route('doctor.bookings.index'),
+            'admin', 'owner' => route('home'),
+            default => route('home'),
+        };
+
+        return redirect()->intended($fallbackRoute);
     }
 
     public function destroy(Request $request): RedirectResponse|JsonResponse

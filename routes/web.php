@@ -4,6 +4,7 @@ use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\BookingStatusController;
 use App\Http\Controllers\Customer\BookingController;
 use App\Http\Controllers\Customer\BookingPageController;
+use App\Http\Controllers\Customer\PetController;
 use App\Http\Controllers\Doctor\BookingController as DoctorBookingController;
 use Illuminate\Support\Facades\Route;
 
@@ -20,6 +21,12 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->name('logout');
 
 Route::middleware(['auth', 'role:customer'])->prefix('customer')->name('customer.')->group(function () {
+    Route::get('/pets', [PetController::class, 'index'])->name('pets.index');
+    Route::get('/pets/create', [PetController::class, 'create'])->name('pets.create');
+    Route::post('/pets', [PetController::class, 'store'])->name('pets.store');
+    Route::get('/pets/{pet}/edit', [PetController::class, 'edit'])->name('pets.edit');
+    Route::put('/pets/{pet}', [PetController::class, 'update'])->name('pets.update');
+    Route::get('/pets/{pet}', [PetController::class, 'show'])->name('pets.show');
     Route::get('/bookings', [BookingController::class, 'index'])->name('bookings.index');
     Route::get('/bookings/create', [BookingPageController::class, 'create'])->name('bookings.create');
     Route::get('/booking-availability', [BookingPageController::class, 'availability'])->name('booking-availability');

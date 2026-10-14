@@ -20,6 +20,7 @@
             <nav class="customer-nav" aria-label="Customer navigation">
                 <span>Welcome, {{ auth()->user()->name }}</span>
                 <a class="customer-nav-link" href="{{ route('customer.bookings.index') }}">My bookings</a>
+                <a class="customer-nav-link" href="{{ route('customer.pets.index') }}">My pets</a>
                 <form method="POST" action="{{ route('logout') }}">
                     @csrf
                     <button type="submit" class="customer-nav-link">Log out</button>
