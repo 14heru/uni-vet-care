@@ -20,6 +20,7 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
     ->name('logout');
 
 Route::middleware(['auth', 'role:customer'])->prefix('customer')->name('customer.')->group(function () {
+    Route::get('/bookings', [BookingController::class, 'index'])->name('bookings.index');
     Route::get('/bookings/create', [BookingPageController::class, 'create'])->name('bookings.create');
     Route::get('/booking-availability', [BookingPageController::class, 'availability'])->name('booking-availability');
     Route::get('/bookings/{booking}', [BookingController::class, 'show'])->name('bookings.show');

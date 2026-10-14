@@ -15,6 +15,21 @@ use Illuminate\View\View;
 
 class BookingController extends Controller
 {
+    public function index(Request $request): View
+    {
+        $customer = $request->user()->customerProfile;
+
+        abort_if($customer === null, 403);
+
+        $bookings = $customer->bookings()
+            ->with(['doctor.user:id,name', 'pet:id,name,species'])
+            ->latest('created_at')
+            ->latest('id')
+            ->get();
+
+        return view('customer.bookings.index', compact('bookings'));
+    }
+
     public function show(Request $request, Booking $booking): View
     {
         Gate::forUser($request->user())->authorize('view', $booking);

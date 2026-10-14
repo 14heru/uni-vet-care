@@ -4,6 +4,10 @@ namespace Tests\Feature;
 
 use App\Models\AuditLog;
 use App\Models\Booking;
+use App\Models\CustomerProfile;
+use App\Models\DoctorProfile;
+use App\Models\DoctorSchedule;
+use App\Models\Pet;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\AuditLogService;
@@ -163,9 +167,138 @@ class CustomerBookingUiTest extends TestCase
             ->assertSee('09:30 WIB')
             ->assertSee('Dr. Available Vet')
             ->assertSee('Milo (Cat)')
-            ->assertSee(Booking::STATUS_PENDING)
+            ->assertSee('Pending')
             ->assertDontSee('slot_key')
             ->assertDontSee('customer_id');
+    }
+
+    public function test_booking_result_copy_and_status_label_match_every_supported_status(): void
+    {
+        $customer = $this->createCustomer();
+        $pet = $customer['customer']->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
+        $doctor = $this->createDoctor('Available Vet');
+        $expected = [
+            Booking::STATUS_PENDING => [
+                'title' => 'Booking request received',
+                'message' => 'Your booking request is waiting for confirmation from the clinic.',
+                'label' => 'Pending',
+            ],
+            Booking::STATUS_CONFIRMED => [
+                'title' => 'Appointment confirmed',
+                'message' => 'Your appointment has been confirmed by the clinic.',
+                'label' => 'Confirmed',
+            ],
+            Booking::STATUS_COMPLETED => [
+                'title' => 'Appointment completed',
+                'message' => 'Your pet’s appointment has been completed.',
+                'label' => 'Completed',
+            ],
+            Booking::STATUS_CANCELLED => [
+                'title' => 'Appointment cancelled',
+                'message' => 'This appointment has been cancelled.',
+                'label' => 'Cancelled',
+            ],
+            Booking::STATUS_NO_SHOW => [
+                'title' => 'Appointment marked as no-show',
+                'message' => 'This appointment was marked as no-show because the customer did not attend.',
+                'label' => 'No show',
+            ],
+        ];
+
+        $this->actingAs($customer['user']);
+
+        foreach ($expected as $status => $copy) {
+            $booking = $this->createUiBooking(
+                $customer['customer'],
+                $pet,
+                $doctor['profile'],
+                $doctor['schedule'],
+                'UVC-STATUS-'.str_replace('_', '-', $status),
+                $status,
+            );
+
+            $this->get(route('customer.bookings.show', $booking))
+                ->assertOk()
+                ->assertSee($copy['title'])
+                ->assertSee($copy['message'])
+                ->assertSee('<span class="booking-status-pill">'.$copy['label'].'</span>', false);
+        }
+    }
+
+    public function test_customer_booking_history_is_scoped_sorted_and_links_to_booking_details(): void
+    {
+        $customer = $this->createCustomer();
+        $pet = $customer['customer']->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
+        $otherCustomer = $this->createCustomer();
+        $otherPet = $otherCustomer['customer']->pets()->create(['name' => 'Luna', 'species' => 'Dog']);
+        $doctor = $this->createDoctor('Available Vet');
+
+        $olderBooking = $this->createUiBooking(
+            $customer['customer'], $pet, $doctor['profile'], $doctor['schedule'], 'UVC-HISTORY-OLDER',
+        );
+        $newerBooking = $this->createUiBooking(
+            $customer['customer'], $pet, $doctor['profile'], $doctor['schedule'], 'UVC-HISTORY-NEWER',
+            Booking::STATUS_CONFIRMED,
+        );
+        $this->createUiBooking(
+            $otherCustomer['customer'], $otherPet, $doctor['profile'], $doctor['schedule'], 'UVC-HISTORY-PRIVATE',
+        );
+
+        $this->actingAs($customer['user'])
+            ->get(route('customer.bookings.index'))
+            ->assertOk()
+            ->assertSeeInOrder(['UVC-HISTORY-NEWER', 'UVC-HISTORY-OLDER'])
+            ->assertSee('Dr. Available Vet')
+            ->assertSee('Milo (Cat)')
+            ->assertSee('Confirmed')
+            ->assertDontSee('UVC-HISTORY-PRIVATE')
+            ->assertSee('href="'.route('customer.bookings.show', $newerBooking).'"', false)
+            ->assertSee('href="'.route('customer.bookings.show', $olderBooking).'"', false);
+    }
+
+    public function test_customer_booking_history_shows_an_empty_state(): void
+    {
+        $customer = $this->createCustomer();
+
+        $this->actingAs($customer['user'])
+            ->get(route('customer.bookings.index'))
+            ->assertOk()
+            ->assertSee('No bookings yet')
+            ->assertSee('Your appointment bookings will appear here.')
+            ->assertSee('Book an appointment');
+    }
+
+    public function test_booking_history_requires_customer_authentication_and_role(): void
+    {
+        $this->get(route('customer.bookings.index'))
+            ->assertRedirect('/login');
+
+        $doctor = $this->createDoctor('Clinic Vet');
+
+        $this->actingAs($doctor['user'])
+            ->get(route('customer.bookings.index'))
+            ->assertForbidden();
+    }
+
+    public function test_customer_cannot_open_another_customers_booking_detail_over_http(): void
+    {
+        $customer = $this->createCustomer();
+        $otherCustomer = $this->createCustomer();
+        $otherPet = $otherCustomer['customer']->pets()->create(['name' => 'Private Pet', 'species' => 'Rabbit']);
+        $doctor = $this->createDoctor('Available Vet');
+        $booking = $this->createUiBooking(
+            $otherCustomer['customer'],
+            $otherPet,
+            $doctor['profile'],
+            $doctor['schedule'],
+            'UVC-PRIVATE-DETAIL',
+        );
+
+        $this->actingAs($customer['user'])
+            ->get(route('customer.bookings.show', $booking))
+            ->assertForbidden()
+            ->assertDontSee('UVC-PRIVATE-DETAIL')
+            ->assertDontSee('Private Pet');
     }
 
     public function test_browser_cannot_override_booking_customer_context(): void
@@ -283,5 +416,30 @@ class CustomerBookingUiTest extends TestCase
         ]);
 
         return compact('user', 'profile', 'schedule');
+    }
+
+    private function createUiBooking(
+        CustomerProfile $customer,
+        Pet $pet,
+        DoctorProfile $doctor,
+        DoctorSchedule $schedule,
+        string $bookingCode,
+        string $status = Booking::STATUS_PENDING,
+    ): Booking {
+        $booking = new Booking;
+        $booking->forceFill([
+            'booking_code' => $bookingCode,
+            'customer_id' => $customer->id,
+            'pet_id' => $pet->id,
+            'doctor_id' => $doctor->id,
+            'doctor_schedule_id' => $schedule->id,
+            'appointment_start' => '2026-10-05 09:00:00',
+            'appointment_end' => '2026-10-05 09:30:00',
+            'status' => $status,
+            'slot_key' => null,
+        ]);
+        $booking->save();
+
+        return $booking;
     }
 }
