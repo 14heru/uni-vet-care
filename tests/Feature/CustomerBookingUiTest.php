@@ -280,6 +280,43 @@ class CustomerBookingUiTest extends TestCase
             ->assertForbidden();
     }
 
+    public function test_deactivated_customer_session_cannot_access_protected_booking_routes(): void
+    {
+        $customer = $this->createCustomer();
+        $pet = $customer['customer']->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
+        $doctor = $this->createDoctor('Available Vet');
+        $booking = $this->createUiBooking(
+            $customer['customer'],
+            $pet,
+            $doctor['profile'],
+            $doctor['schedule'],
+            'UVC-DEACTIVATED-SESSION',
+        );
+
+        $this->actingAs($customer['user']);
+        $customer['user']->forceFill(['status' => 'inactive'])->save();
+
+        $this->get(route('customer.bookings.index'))->assertForbidden();
+        $this->get(route('customer.bookings.show', $booking))->assertForbidden();
+        $this->get(route('customer.bookings.create'))->assertForbidden();
+        $this->getJson(route('customer.booking-availability', [
+            'doctor_id' => $doctor['profile']->id,
+            'date' => '2026-10-05',
+        ]))->assertForbidden();
+        $this->post(route('customer.bookings.store'), [
+            '_token' => csrf_token(),
+            'pet_id' => $pet->id,
+            'doctor_id' => $doctor['profile']->id,
+            'doctor_schedule_id' => $doctor['schedule']->id,
+            'appointment_start' => '2026-10-05T09:30+07:00',
+            'appointment_end' => '2026-10-05T10:00+07:00',
+        ])->assertForbidden();
+
+        $this->post(route('logout'), ['_token' => csrf_token()])
+            ->assertRedirect('/');
+        $this->assertGuest();
+    }
+
     public function test_customer_cannot_open_another_customers_booking_detail_over_http(): void
     {
         $customer = $this->createCustomer();

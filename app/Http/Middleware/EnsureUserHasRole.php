@@ -21,9 +21,19 @@ class EnsureUserHasRole
     public function handle(Request $request, Closure $next, string ...$roles): Response
     {
         $allowedRoles = array_intersect($roles, self::CANONICAL_ROLES);
-        $actualRole = $request->user()?->role?->name;
+        $user = $request->user();
+        $actualRole = $user?->role?->name;
+        $isActive = $user !== null && $user->newQuery()
+            ->whereKey($user->getKey())
+            ->where('status', 'active')
+            ->exists();
 
-        abort_unless($actualRole !== null && in_array($actualRole, $allowedRoles, true), Response::HTTP_FORBIDDEN);
+        abort_unless(
+            $isActive
+                && $actualRole !== null
+                && in_array($actualRole, $allowedRoles, true),
+            Response::HTTP_FORBIDDEN,
+        );
 
         return $next($request);
     }
