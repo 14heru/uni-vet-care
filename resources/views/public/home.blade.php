@@ -74,7 +74,7 @@
             <div>
                 <p class="eyebrow eyebrow-light">A good first step</p>
                 <h2 id="booking-title">Let’s make their next visit a good one.</h2>
-                <p>Online appointment booking is coming soon. We’re getting everything ready to help you find the right care for your pet.</p>
+                <p>Choose your pet, a doctor, and an available time to request an appointment online.</p>
             </div>
             <a class="button button-light" href="{{ route('customer.bookings.create') }}">Book an appointment <span aria-hidden="true">&rarr;</span></a>
         </div>

@@ -21,8 +21,11 @@ a { color: inherit; }
 .brand { display: inline-flex; align-items: center; gap: .8rem; color: var(--plum); font-size: 1.02rem; font-weight: 750; letter-spacing: .01em; text-decoration: none; }
 .brand-mark { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--coral); border-radius: 50%; color: #bd6557; font-family: Georgia, serif; font-size: 1.25rem; font-weight: 500; }
 .site-nav { display: flex; align-items: center; gap: clamp(1rem, 3vw, 2.5rem); }
-.site-nav a { color: #625d69; font-size: .83rem; font-weight: 650; letter-spacing: .045em; text-decoration: none; transition: color .2s ease; }
+.site-nav a { min-height: 44px; display: inline-flex; align-items: center; color: #625d69; font-size: .83rem; font-weight: 650; letter-spacing: .045em; text-decoration: none; transition: color .2s ease; }
 .site-nav a:hover, .site-nav a:focus-visible { color: #c8685b; }
+.site-nav a:focus-visible, .button:focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+.site-nav .site-nav-sign-in { padding: .35rem .8rem; border: 1px solid #c77465; color: var(--plum); }
+.site-nav .site-nav-sign-in:hover, .site-nav .site-nav-sign-in:focus-visible { color: #8e5148; background: #fff7f1; }
 .hero { min-height: 650px; position: relative; overflow: hidden; display: grid; place-items: center; padding: 5rem 1.5rem 4rem; color: white; text-align: center; background: radial-gradient(ellipse at 50% 20%, #514356 0, var(--plum) 52%, var(--plum-deep) 100%); }
 .hero-pattern { position: absolute; inset: 0; opacity: .18; background-image: radial-gradient(rgba(255,255,255,.42) .7px, transparent .7px); background-size: 15px 15px; mask-image: linear-gradient(to bottom, #000, transparent 82%); }
 .hero-content { z-index: 1; width: min(690px, 100%); }
@@ -84,7 +87,7 @@ h2 em { color: #c77465; font-weight: 400; }
 
 @media (max-width: 700px) {
     .header-inner { width: min(100% - 2rem, 1120px); min-height: 70px; flex-wrap: wrap; justify-content: center; gap: .4rem; padding: .8rem 0; }
-    .site-nav { width: 100%; justify-content: center; gap: clamp(.8rem, 5vw, 1.5rem); }
+    .site-nav { width: 100%; flex-wrap: wrap; justify-content: center; gap: .15rem clamp(.55rem, 4vw, 1.2rem); }
     .site-nav a { font-size: .72rem; }
     .hero { min-height: 610px; padding-top: 4rem; }
     .hero-emblem { width: 82px; height: 82px; }

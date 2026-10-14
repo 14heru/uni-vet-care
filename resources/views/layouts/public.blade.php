@@ -23,6 +23,7 @@
                 <a href="#services">Services</a>
                 <a href="#doctors">Doctors</a>
                 <a href="#contact">Contact</a>
+                <a class="site-nav-sign-in" href="{{ route('login') }}">Sign in</a>
             </nav>
         </div>
     </header>
