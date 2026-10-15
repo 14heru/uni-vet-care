@@ -225,6 +225,37 @@ class CustomerBookingUiTest extends TestCase
         }
     }
 
+    public function test_customer_booking_detail_only_shows_cancellation_form_for_cancellable_statuses(): void
+    {
+        $customer = $this->createCustomer();
+        $pet = $customer['customer']->pets()->create(['name' => 'Milo', 'species' => 'Cat']);
+        $doctor = $this->createDoctor('Available Vet');
+
+        $this->actingAs($customer['user']);
+
+        foreach (Booking::STATUSES as $status) {
+            $booking = $this->createUiBooking(
+                $customer['customer'],
+                $pet,
+                $doctor['profile'],
+                $doctor['schedule'],
+                'UVC-CANCEL-FORM-'.str_replace('_', '-', $status),
+                $status,
+            );
+
+            $response = $this->get(route('customer.bookings.show', $booking));
+
+            if (in_array($status, [Booking::STATUS_PENDING, Booking::STATUS_CONFIRMED], true)) {
+                $response->assertSee(route('bookings.status.transition', $booking))
+                    ->assertSee('name="_token"', false)
+                    ->assertSee('name="status" value="CANCELLED"', false)
+                    ->assertSee('Cancel appointment');
+            } else {
+                $response->assertDontSee('Cancel appointment');
+            }
+        }
+    }
+
     public function test_customer_booking_history_is_scoped_sorted_and_links_to_booking_details(): void
     {
         $customer = $this->createCustomer();

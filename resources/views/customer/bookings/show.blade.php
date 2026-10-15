@@ -48,6 +48,9 @@
         <p class="eyebrow">{{ $statusPresentation['eyebrow'] }}</p>
         <h1 id="booking-result-title">{{ $statusPresentation['title'] }}</h1>
         <p class="booking-introduction">{{ $statusPresentation['message'] }} Keep the booking code for your records.</p>
+        @if (session('status'))
+            <p class="booking-introduction" role="status">{{ session('status') }}</p>
+        @endif
 
         <dl class="booking-result-details">
             <div>
@@ -71,6 +74,18 @@
                 <dd><span class="booking-status-pill">{{ $statusPresentation['label'] }}</span></dd>
             </div>
         </dl>
+
+        @if (in_array($booking->status, [\App\Models\Booking::STATUS_PENDING, \App\Models\Booking::STATUS_CONFIRMED], true))
+            <form class="booking-form booking-cancellation-form" method="POST" action="{{ route('bookings.status.transition', $booking) }}">
+                @csrf
+                <input type="hidden" name="status" value="{{ \App\Models\Booking::STATUS_CANCELLED }}">
+                <div class="booking-field">
+                    <label for="cancellation_reason">Cancellation reason <span>(optional)</span></label>
+                    <textarea id="cancellation_reason" name="reason" rows="3" maxlength="1000">{{ old('reason') }}</textarea>
+                </div>
+                <button class="button customer-submit" type="submit">Cancel appointment</button>
+            </form>
+        @endif
 
         <a class="button customer-submit" href="{{ route('customer.bookings.create') }}">Book another appointment</a>
     </section>

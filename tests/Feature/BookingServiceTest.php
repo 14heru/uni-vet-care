@@ -11,6 +11,7 @@ use App\Models\Pet;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\BookingService;
+use App\Services\BookingStatusService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -90,6 +91,26 @@ class BookingServiceTest extends TestCase
             sprintf('doctor:%d:20261005090000', $fixture['doctor']->id),
             $booking->slot_key,
         );
+    }
+
+    public function test_cancelled_booking_releases_its_slot_for_a_new_booking(): void
+    {
+        $fixture = $this->createFixture();
+        $cancelledBooking = $this->book($fixture);
+
+        app(BookingStatusService::class)->transition(
+            $cancelledBooking,
+            $fixture['user'],
+            Booking::STATUS_CANCELLED,
+        );
+
+        $replacementBooking = $this->book($fixture);
+
+        $this->assertNull($cancelledBooking->fresh()->slot_key);
+        $this->assertSame(Booking::STATUS_CANCELLED, $cancelledBooking->fresh()->status);
+        $this->assertSame(Booking::STATUS_PENDING, $replacementBooking->status);
+        $this->assertNotEmpty($replacementBooking->slot_key);
+        $this->assertSame(2, Booking::query()->count());
     }
 
     public function test_admin_cannot_create_booking_for_a_nonexistent_pet(): void

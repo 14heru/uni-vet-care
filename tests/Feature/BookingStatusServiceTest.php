@@ -38,10 +38,16 @@ class BookingStatusServiceTest extends TestCase
 
         foreach ($transitions as [$currentStatus, $newStatus]) {
             $booking = $this->createBooking($fixture, $currentStatus);
+            $slotKey = 'doctor:'.$fixture['doctor']->id.':'.fake()->unique()->bothify('##############');
+            $booking->forceFill(['slot_key' => $slotKey])->save();
 
             $updated = app(BookingStatusService::class)->transition($booking, $fixture['actor'], $newStatus);
 
             $this->assertSame($newStatus, $updated->fresh()->status);
+            $this->assertSame(
+                $newStatus === Booking::STATUS_CONFIRMED ? $slotKey : null,
+                $updated->fresh()->slot_key,
+            );
             $this->assertSame(1, $booking->statusHistories()->count());
             $this->assertSame($newStatus, $booking->statusHistories()->firstOrFail()->status);
             $this->assertSame(1, AuditLog::query()->where('entity_id', $booking->id)->where('action', AuditLogService::ACTION_BOOKING_STATUS_CHANGED)->count());

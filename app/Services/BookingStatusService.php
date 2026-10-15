@@ -57,6 +57,15 @@ class BookingStatusService
             }
 
             $persistedBooking->status = $newStatus;
+
+            if (in_array($newStatus, [
+                Booking::STATUS_CANCELLED,
+                Booking::STATUS_COMPLETED,
+                Booking::STATUS_NO_SHOW,
+            ], true)) {
+                $persistedBooking->slot_key = null;
+            }
+
             $persistedBooking->save();
 
             $persistedBooking->statusHistories()->create([

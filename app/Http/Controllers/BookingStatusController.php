@@ -7,6 +7,7 @@ use App\Http\Requests\TransitionBookingStatusRequest;
 use App\Models\Booking;
 use App\Services\BookingStatusService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Gate;
 
 class BookingStatusController extends Controller
@@ -15,7 +16,7 @@ class BookingStatusController extends Controller
         TransitionBookingStatusRequest $request,
         Booking $booking,
         BookingStatusService $bookingStatusService,
-    ): JsonResponse {
+    ): JsonResponse|RedirectResponse {
         $input = $request->validated();
 
         Gate::forUser($request->user())->authorize('transitionStatus', [$booking, $input['status']]);
@@ -31,6 +32,11 @@ class BookingStatusController extends Controller
             return response()->json([
                 'message' => 'The requested booking status transition is not allowed.',
             ], JsonResponse::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        if (! $request->expectsJson() && $request->user()?->role?->name === 'customer') {
+            return redirect()->route('customer.bookings.show', $updatedBooking)
+                ->with('status', 'Your booking has been cancelled.');
         }
 
         return response()->json([

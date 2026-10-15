@@ -12,8 +12,9 @@
 .booking-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.4rem; }
 .booking-field { display: flex; flex-direction: column; gap: .45rem; }
 .booking-field label { color: var(--plum); font-size: .88rem; font-weight: 700; }
-.booking-field select, .booking-field input { width: 100%; min-height: 48px; padding: .7rem .85rem; border: 1px solid #cfc6c1; border-radius: 2px; color: var(--ink); background: white; font: inherit; }
-.booking-field select:focus-visible, .booking-field input:focus-visible, .slot-option:focus-visible, .customer-submit:focus-visible, .customer-nav-link:focus-visible { outline: 3px solid #c77465; outline-offset: 3px; }
+.booking-field select, .booking-field input, .booking-field textarea { width: 100%; min-height: 48px; padding: .7rem .85rem; border: 1px solid #cfc6c1; border-radius: 2px; color: var(--ink); background: white; font: inherit; }
+.booking-field textarea { min-height: 6rem; resize: vertical; }
+.booking-field select:focus-visible, .booking-field input:focus-visible, .booking-field textarea:focus-visible, .slot-option:focus-visible, .customer-submit:focus-visible, .customer-nav-link:focus-visible { outline: 3px solid #c77465; outline-offset: 3px; }
 .booking-slots { margin: 2.3rem 0; padding-top: 1.8rem; border-top: 1px solid var(--line); }
 .booking-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .booking-section-heading h2, .booking-empty-state h2 { margin-bottom: .4rem; color: var(--plum); font-family: Georgia, "Times New Roman", serif; font-size: 1.55rem; font-weight: 400; }

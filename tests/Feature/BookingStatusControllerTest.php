@@ -54,12 +54,50 @@ class BookingStatusControllerTest extends TestCase
             ->assertJsonMissingPath('data.reason');
 
         $this->assertSame(Booking::STATUS_CANCELLED, $booking->fresh()->status);
+        $this->assertNull($booking->fresh()->slot_key);
         $this->assertDatabaseCount('booking_status_histories', 1);
         $this->assertDatabaseHas('booking_status_histories', [
             'booking_id' => $booking->id,
             'status' => Booking::STATUS_CANCELLED,
             'reason' => 'Customer request',
         ]);
+    }
+
+    public function test_customer_can_cancel_own_pending_or_confirmed_booking_through_the_browser(): void
+    {
+        foreach ([Booking::STATUS_PENDING, Booking::STATUS_CONFIRMED] as $status) {
+            [$customer, , $booking] = $this->createFixture($status);
+
+            $this->actingAs($customer->user)
+                ->post(route('bookings.status.transition', $booking), [
+                    'status' => Booking::STATUS_CANCELLED,
+                    'reason' => 'Customer request',
+                ])
+                ->assertRedirect(route('customer.bookings.show', $booking))
+                ->assertSessionHas('status', 'Your booking has been cancelled.');
+
+            $this->assertSame(Booking::STATUS_CANCELLED, $booking->fresh()->status);
+            $this->assertDatabaseHas('booking_status_histories', [
+                'booking_id' => $booking->id,
+                'status' => Booking::STATUS_CANCELLED,
+                'reason' => 'Customer request',
+            ]);
+        }
+    }
+
+    public function test_customer_cannot_cancel_a_terminal_booking(): void
+    {
+        foreach ([Booking::STATUS_COMPLETED, Booking::STATUS_CANCELLED, Booking::STATUS_NO_SHOW] as $status) {
+            [$customer, , $booking] = $this->createFixture($status);
+
+            $this->actingAs($customer->user)
+                ->postJson(route('bookings.status.transition', $booking), ['status' => Booking::STATUS_CANCELLED])
+                ->assertUnprocessable()
+                ->assertExactJson(['message' => 'The requested booking status transition is not allowed.']);
+
+            $this->assertSame($status, $booking->fresh()->status);
+            $this->assertDatabaseMissing('booking_status_histories', ['booking_id' => $booking->id]);
+        }
     }
 
     public function test_customer_cannot_confirm_own_booking(): void
@@ -116,6 +154,7 @@ class BookingStatusControllerTest extends TestCase
                 'booking_id' => $booking->id,
                 'status' => $targetStatus,
             ]);
+            $this->assertNull($booking->fresh()->slot_key);
         }
     }
 
@@ -305,6 +344,9 @@ class BookingStatusControllerTest extends TestCase
             'appointment_start' => '2026-10-05 09:00:00',
             'appointment_end' => '2026-10-05 09:30:00',
             'status' => $status,
+            'slot_key' => in_array($status, [Booking::STATUS_PENDING, Booking::STATUS_CONFIRMED], true)
+                ? 'doctor:'.$doctor->id.':'.fake()->unique()->bothify('########')
+                : null,
         ])->save();
 
         return $booking;
